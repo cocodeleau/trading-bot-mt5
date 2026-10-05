@@ -7,7 +7,7 @@
 //|  DEMO ACCOUNT ONLY until fully validated.                       |
 //+------------------------------------------------------------------+
 #property copyright "Demo/testing EA — not financial advice"
-#property version   "1.10"
+#property version   "1.20"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -34,9 +34,10 @@ input double InpTPPoints          = 15.0;    // Per-position TP, raw price dista
 input double InpSLPoints          = 2000.0;  // Per-position native SL in symbol points (x _Point; 2000 = $20 on 2-digit XAUUSD). 0 = off. Must stay > grid spacing
 input double InpBasketTPPercent   = 10.0;    // Combined-basket rescue TP, % of initial balance
 input double InpCommissionPerTrade= 4.50;    // Flat round-turn commission per position ($)
-input double InpEquityStopPercent = 20.0;    // Kill switch, % drawdown from initial balance
+input double InpEquityStopPercent = 20.0;    // Kill switch, % drawdown from PEAK equity (high-water mark, persisted)
+input double InpMaxLotsPer100     = 0.05;    // Exposure cap: max total open lots (buy+sell, this EA) per 100 of equity. 0 = off
 input ulong  InpMagicBase         = 990100;  // Magic base (buy = base+1, sell = base+2)
-input bool   InpResetBaseline     = false;   // true = overwrite persisted initial balance with current balance on init (set back to false after)
+input bool   InpResetBaseline     = false;   // true = overwrite persisted initial balance and peak equity with current values on init (set back to false after)
 
 //--- Globals
 CTrade   trade;
@@ -45,6 +46,7 @@ int      bbHandleM15   = INVALID_HANDLE;
 int      bbHandleH1    = INVALID_HANDLE;
 int      atrHandle   = INVALID_HANDLE;
 double   g_initialBalance = 0.0;
+double   g_peakEquity     = 0.0;     // high-water mark for the kill switch, persisted like g_initialBalance
 double   g_buyLastPrice   = 0.0;
 double   g_sellLastPrice  = 0.0;
 bool     g_buyBlocked     = false;   // true once an add-level attempt failed (e.g. margin) — stops retry spam until basket resets
@@ -93,6 +95,17 @@ int OnInit()
       return(INIT_FAILED);
      }
 
+   //--- peak equity: the kill switch measures drawdown from the best equity reached, not from
+   //--- the initial deposit, because lot size grows with balance (capital tiers)
+   string peakKey = PeakKey();
+   if(InpResetBaseline || !GlobalVariableCheck(peakKey))
+      g_peakEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   else
+      g_peakEquity = MathMax(GlobalVariableGet(peakKey), AccountInfoDouble(ACCOUNT_EQUITY));
+   GlobalVariableSet(peakKey, g_peakEquity);
+   GlobalVariablesFlush();
+   Print("Peak equity reference: ", g_peakEquity, " (", peakKey, ")");
+
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: account is not in hedging mode — simultaneous buy+sell grids will net instead of hedge.");
 
@@ -106,6 +119,12 @@ int OnInit()
 string BaselineKey()
   {
    return("GridExpHedge_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_initialBalance");
+  }
+
+//+------------------------------------------------------------------+
+string PeakKey()
+  {
+   return("GridExpHedge_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_peakEquity");
   }
 
 //+------------------------------------------------------------------+
@@ -151,6 +170,22 @@ int CountLevel(ulong magic)
       count++;
      }
    return(count);
+  }
+
+//+------------------------------------------------------------------+
+double TotalOpenLots()
+  {
+   double lots = 0.0;
+   for(int i = 0; i < PositionsTotal(); i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      ulong magic = (ulong)PositionGetInteger(POSITION_MAGIC);
+      if(magic != g_magicBuy && magic != g_magicSell) continue;
+      lots += PositionGetDouble(POSITION_VOLUME);
+     }
+   return(lots);
   }
 
 //+------------------------------------------------------------------+
@@ -228,6 +263,25 @@ bool OpenGridOrder(bool isBuy, int level)
    double baseLot = isBuy ? g_buyBaseLot : g_sellBaseLot;
    double lot = NormalizeLot(baseLot * MathPow(InpLotMultiplier, level - 1));
    ulong  magic = isBuy ? g_magicBuy : g_magicSell;
+
+   //--- exposure cap: refuse any order that would push total open volume past the equity-scaled limit
+   if(InpMaxLotsPer100 > 0)
+     {
+      double capLots = AccountInfoDouble(ACCOUNT_EQUITY) / 100.0 * InpMaxLotsPer100;
+      double openLots = TotalOpenLots();
+      if(openLots + lot > capLots + 1e-8)
+        {
+         static datetime s_lastCapLog = 0;
+         if(TimeCurrent() - s_lastCapLog > 60)
+           {
+            Print("Exposure cap: ", isBuy ? "BUY" : "SELL", " level ", level, " lot=", lot, " refused (open=", openLots,
+                  ", cap=", DoubleToString(capLots, 2), ")");
+            s_lastCapLog = TimeCurrent();
+           }
+         return(false);
+        }
+     }
+
    trade.SetExpertMagicNumber(magic);
 
    string comment = StringFormat("GridExp-%s-L%d", isBuy ? "Buy" : "Sell", level);
@@ -378,7 +432,12 @@ void CheckBasketExits()
 bool CheckKillSwitch()
   {
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double floor   = g_initialBalance * (1.0 - InpEquityStopPercent / 100.0);
+   if(equity > g_peakEquity)
+     {
+      g_peakEquity = equity;
+      GlobalVariableSet(PeakKey(), g_peakEquity);
+     }
+   double floor   = g_peakEquity * (1.0 - InpEquityStopPercent / 100.0);
    if(equity <= floor)
      {
       CloseAllAndDisable();

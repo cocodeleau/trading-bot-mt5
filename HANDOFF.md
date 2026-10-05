@@ -11,7 +11,9 @@ Construire un Expert Advisor MetaTrader 5 (`GridExpHedge.mq5`) qui trade **XAUUS
 
 L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `FusionMarkets-Live`, mode **Hedge**), avec un VPS MetaQuotes New York activé pour un fonctionnement 24/7 indépendant du Mac local.
 
-**Avertissement important** : la stratégie est un grid martingale exponentiel, structurellement à haut risque. Le compte a déjà été cramé une fois le 19 août 2026 (voir section Problèmes connus). Les 3 fixes de sécurité ont été codés le 2026-10-05 (v1.10) mais **ne sont pas encore testés en démo** — ne pas reconnecter en live avant.
+**Avertissement important** : la stratégie est un grid martingale exponentiel, structurellement à haut risque. Le compte a déjà été cramé une fois le 19 août 2026 (voir section Problèmes connus).
+
+**⛔ Statut au 2026-10-05 : stratégie martingale ABANDONNÉE.** 6 backtests (section 3bis) montrent qu'aucune version (v1.00 → v1.20) ne survit plus de ~8 jours sur 100-110$ — avec ou sans protections. Ne pas remettre GridExpHedge en live. Le VPS fait encore tourner la v1.00 sur le compte Fusion (≈0.27$) : à désactiver. Prochaine étape : nouvelle stratégie **non martingale** (section 8).
 
 ---
 
@@ -33,7 +35,8 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 | TP panier (rescue) | +10% du solde initial, net de commission | Mécanisme martingale conservé : si le combiné d'un panier (buy ou sell, filtre magic) repasse en profit suffisant, ferme tout ce qui reste de ce côté |
 | Commission | 4.50$ flat round-turn par position (Fusion Markets) | Décomptée du calcul `BasketProfit()` car MT5 ne l'inclut pas dans `POSITION_PROFIT` flottant |
 | SL natif par position | **2000 points** (`InpSLPoints`, × `_Point` → 20$ de mouvement sur XAUUSD 2 décimales), 0 = désactivé | Ajouté v1.10. Le handoff précédent proposait 50-100 points, mais 100 points = 1$ sur l'or, bien moins que l'espacement grid (ATR×1.5) : chaque position serait stoppée avant l'ouverture du niveau suivant. Warning dans le journal si SL ≤ espacement |
-| Kill switch equity | **-20% du solde initial** (v1.10, était -50%) | -50% s'est révélé bien trop tolérant le 19 août |
+| Kill switch equity | **-20% du PIC d'equity** (v1.20 ; v1.10 = -20% du solde initial ; v1.00 = -50% du solde initial) | Les lots grossissent avec la balance (paliers), un seuil fixé sur le dépôt laissait repartir 86% des gains (backtest v1.00). Pic persisté dans `GridExpHedge_<login>_peakEquity` |
+| Plafond d'exposition | **0.05 lot max ouvert (buy+sell) par 100$ d'equity** (`InpMaxLotsPer100`, v1.20, 0 = off) | Empêche l'empilement martingale (0.08+0.16+0.32…) qui a cramé le compte |
 | Référence solde initial | Persistée dans la variable globale terminal `GridExpHedge_<login>_initialBalance` | v1.10 : ne bouge plus à chaque redéploiement. `InpResetBaseline = true` pour la réinitialiser (ex : après dépôt), puis remettre à `false` |
 | Anti-spam retry | Flag `g_buyBlocked`/`g_sellBlocked` : un ordre échoué (ex: marge insuffisante) stoppe les tentatives sur ce panier jusqu'à sa fermeture | Évite boucle de centaines d'ordres/sec (bug observé le 13 août) |
 
@@ -57,7 +60,31 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 - ✅ Bug anti-spam retry corrigé (constaté 13 Aug : 100aines d'ordres `buy 0.04 not enough money` en quelques secondes → flag `blocked` ajouté).
 - ✅ Multi-timeframe confluence implémenté avec paramètres BB séparés par TF (`InpBBPeriod_M15/H1`, `InpBBDeviation_M15/H1`).
 - ✅ Commit git du fichier source : `c60d3d4 Add GridExpHedge MT5 EA: multi-timeframe grid strategy`.
-- ✅ **v1.10 (2026-10-05)** : 3 fixes de sécurité codés (SL natif par position, kill switch 20%, solde initial persisté). Compile sans erreur ni warning avec MetaEditor Windows. **Pas encore testé en démo ni backtesté, pas encore déployé sur le terminal / VPS.**
+- ✅ **v1.10 (2026-10-05)** : 3 fixes de sécurité codés (SL natif par position, kill switch 20%, solde initial persisté). Compile sans erreur ni warning avec MetaEditor Windows.
+- ✅ **v1.20 (2026-10-05)** : kill switch sur pic d'equity + plafond d'exposition. Compile sans erreur. Jamais déployée sur le VPS.
+- ✅ **6 backtests Strategy Tester** v1.00 / v1.10 / v1.20 (section 3bis) → conclusion : stratégie non viable.
+
+## 3bis. Résultats des backtests (2026-10-05)
+
+Conditions communes : MT5 Strategy Tester, XAUUSD M5, données Fusion Markets Live, mode « Every tick based on real ticks », levier 1:500, arrêt du test dès que le compte est « cramé » (garde-fou backtest-only `TesterStop()` dans des copies de test, pas dans le repo). Fusion n'a de **vrais ticks qu'à partir de 2024** (avant : ticks générés depuis M1).
+
+| Test | Survie | Balance finale | Cause |
+|---|---|---|---|
+| v1.00, 110$, depuis 2021-10-01 | 3 jours | 53.53$ | Pic à 396.75$ puis lots tier-scalés (0.08+0.16+0.32) → −341$ sur un panier, kill switch −50% du dépôt |
+| v1.10, 110$, 2021 | 1 heure | 87.70$ | 0.12 lot ouvert, −20% du dépôt sur un move de ~2$ |
+| v1.20, 110$, 2021 | 1 jour | 120.62$ | −20% depuis le pic (~150$) |
+| v1.20, 1000$ (paliers neutralisés), 2021 | 5 jours | 1089$ | Panier 4 niveaux (0.36 lot), move ~15$ → −20% depuis pic ~1360$ |
+| v1.20, 100$, kill switch 90%, 2021 | 8 jours puis EA figé 5 ans | 38.96$ | 2 paniers SL à −120$ chacun ; ensuite equity < 40$ → plafond < lot min, plus aucun ordre |
+| v1.20, 100$, kill switch 90%, **depuis 2024-01-02 (vrais ticks)** | **7 jours** | **11.47$** | 8 rescue TP à +10$ vs 4 SL à −40$ |
+
+**Diagnostic** : profil gain/perte asymétrique — rescue TP ≈ +10$ contre SL ≈ −40 à −120$ → il faudrait gagner 80-92% des paniers pour être à l'équilibre ; observé 67-91%. Sans protection le martingale crame, avec protection il s'arrête ou saigne. Le TP natif (15$ de mouvement) ne s'est jamais déclenché.
+
+**Bugs identifiés dans GridExpHedge (non corrigés, stratégie abandonnée)** :
+1. `ComputeBaseLot()` double le lot tous les 100$ (`2^(palier-1)`) → à 1000$ l'EA voudrait 10.24 lots.
+2. EA figé silencieusement quand equity < ~40$ (plafond < lot min 0.02).
+3. Log « Exposure cap » : 222 955 lignes sur 5 ans (throttle 1/min insuffisant).
+4. Rescue TP figé à 10% du dépôt initial, indépendant du volume ouvert.
+5. TP natif `InpTPPoints` ajouté brut au prix (15$ de mouvement, pas 15 points).
 
 ## 4. Ce qui est seulement supposé (NON vérifié)
 
@@ -78,7 +105,7 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 
 | Chemin | Contenu | État |
 |---|---|---|
-| `MQL5/Experts/GridExpHedge.mq5` | Source EA complet (seul fichier du projet) | v1.10 commitée (3 fixes de sécurité) |
+| `MQL5/Experts/GridExpHedge.mq5` | Source EA complet (seul fichier du projet) | v1.20 commitée — stratégie abandonnée, gardée pour référence |
 | `MQL5/Experts/GridExpHedge.ex5` | Binaire compilé (côté dossier terminal MT5 Wine, PAS dans le repo git) | Dernière compile 2026-08-19, non versionné car binaire |
 | `HANDOFF.md` | Ce document | Mis à jour 2026-10-05 |
 
@@ -101,6 +128,25 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
   Get-Content build.log -Encoding Unicode
   ```
   Si le chemin du repo est très long (> ~150 caractères), copier le `.mq5` dans un dossier court avant de compiler.
+- Pour **backtester sous Windows en CLI** : MT5 doit être **fermé** (une seule instance par dossier de données) et connecté au compte Fusion (historique). Créer un `.ini` dans le dossier de données du terminal (`%APPDATA%\MetaQuotes\Terminal\D0E8209F77C8CF37AD8BF550E51FF075\`) :
+  ```ini
+  [Tester]
+  Expert=GridExpHedge.ex5
+  Symbol=XAUUSD
+  Period=M5
+  Model=4
+  FromDate=2024.01.02
+  ToDate=2026.10.01
+  Deposit=100
+  Currency=USD
+  Leverage=1:500
+  Report=reports\GridExpHedge_test
+  ReplaceReport=1
+  ShutdownTerminal=1
+  [TesterInputs]
+  InpEquityStopPercent=90
+  ```
+  ⚠️ `Leverage` doit être au format `1:500` (sinon MT5 prend 1:100 sans prévenir). Lancer `& "C:\Program Files\MetaTrader 5\terminal64.exe" /config:"<chemin du .ini>"`. Rapport HTML dans `reports\`, log détaillé dans `%APPDATA%\MetaQuotes\Tester\D0E8209F77C8CF37AD8BF550E51FF075\Agent-127.0.0.1-3000\logs\`.
 
 ---
 
@@ -117,7 +163,7 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 
 **Enchaînement observé sur chart** : mouvement de ~180 points en quelques heures sur XAUUSD, suivi d'un retournement brutal. Les 2 paniers (buy et sell) ont pris simultanément, sell -106.91 et buy -72.89 sur les 2 dernières positions avant kill switch.
 
-**Causes structurelles identifiées** (corrigées dans le code v1.10, non validées en démo) :
+**Causes structurelles identifiées** (corrigées dans le code v1.10/v1.20 — mais les backtests de la section 3bis montrent que la cause de fond est la stratégie elle-même) :
 1. ✅ (v1.10) **Aucun SL par position** — toute la protection reposait uniquement sur le kill switch equity vérifié à chaque tick, trop lent face à un move violent. → `InpSLPoints` ajouté.
 2. ✅ (v1.10) **Kill switch à -50%** — beaucoup trop tolérant. L'écart observé entre seuil visé (~53$) et résultat (0.27$) prouve que même quand il tire, les positions sont déjà bien plus loin que prévu. → passé à 20%.
 3. ✅ (v1.10) **`g_initialBalance` non persistant** — se réinitialisait à chaque `OnInit()`, donc à chaque redéploiement de l'EA (fait ~10 fois en session). → persisté en variable globale terminal. Effet de bord voulu : après un kill switch, relancer l'EA ne le réactive pas tant que l'equity reste sous le seuil.
@@ -132,28 +178,24 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 
 ## 7. Questions ouvertes
 
-1. **Vérifier la vraie cause du crash du 19 août** avant d'appliquer les fixes à l'aveugle : stop-out broker ? slippage ? bug de calcul du check equity ? Télécharger les logs Fusion Markets détaillés si possible, ou backtest du scénario sur données tick de ce jour-là.
-2. **TP par position : `InpTPPoints = 15` est ajouté brut au prix** (`fillPrice + InpTPPoints`, sans `* _Point`). Sur XAUUSD ça donne un TP à **15$ de mouvement**, pas 15 cents. Non corrigé volontairement (changerait toute la stratégie). Le journal affiche désormais `sl=` et `tp=` à chaque ouverture : vérifier en démo, puis décider si on passe en vrais points (`* _Point`) avec une nouvelle valeur. Attention : le SL, lui, est déjà en vrais points.
-3. **Faut-il abandonner le martingale** et pivoter sur une stratégie non-doublement (ex: grid à lot fixe + plus de niveaux, ou pure trend-following) ? Décision stratégique en suspens. User était jusqu'ici attaché au martingale "comme dans la pub d'origine".
+1. ~~Vraie cause du crash du 19 août~~ → réglée par les backtests : structure martingale + lots indexés sur la balance (section 3bis).
+2. ~~TP natif en points~~ → confirmé : 15$ de mouvement, jamais touché en backtest. Sans objet (stratégie abandonnée).
+3. ✅ **Abandon du martingale décidé le 2026-10-05.** Choix de la nouvelle stratégie non martingale : en cours de discussion.
+4. **Capital** : 100$ est très juste pour XAUUSD (lot min 0.01 = 1$ par 1$ de mouvement). Toute nouvelle stratégie doit risquer un % fixe de l'equity par trade et rester viable avec 0.01 lot.
 
 ---
 
 ## 8. Prochaine étape exacte
 
-Les **3 fixes de sécurité** sont codés et compilés (v1.10, 2026-10-05) :
-- **Fix 1** — SL natif par position : `InpSLPoints` (défaut 2000 points, voir section 2 pour le choix de la valeur), passé à `trade.Buy/Sell` dans `OpenGridOrder()`.
-- **Fix 2** — kill switch `InpEquityStopPercent` : 50 → **20**.
-- **Fix 3** — `g_initialBalance` persisté via `GlobalVariableGet/Set()`, clé `GridExpHedge_<login>_initialBalance`, reset via l'input `InpResetBaseline` (ou `GlobalVariableDel()` / F3 dans le terminal).
+GridExpHedge (v1.20) est conservé dans le repo pour référence uniquement.
 
-### Reste à faire, dans l'ordre
-1. Copier le `.mq5` dans le dossier Experts du terminal et recompiler (commandes section 5, Mac ou Windows).
-2. **Tester en démo d'abord** au moins quelques jours :
-   - vérifier dans le journal les valeurs `sl=` / `tp=` de chaque ordre (et trancher la question 2 sur le TP) ;
-   - vérifier l'absence du warning "SL distance <= grid spacing", ajuster `InpSLPoints` sinon ;
-   - voir des SL tirer sur moves adverses sans tuer la stratégie, et le kill switch à 20% se déclencher proprement ;
-   - redémarrer l'EA et vérifier "Initial balance baseline restored" dans le journal.
-3. **Seulement ensuite** reconnecter sur un compte live (Fusion déjà configuré, VPS déjà actif). Penser à la baseline côté VPS (section 4).
-4. Ouvrir une nouvelle discussion sur la viabilité stratégique du martingale à ce niveau de capital (question 3 des questions ouvertes).
+1. **Désactiver GridExpHedge sur le VPS MetaQuotes** (il y tourne encore en v1.00). À faire par le user depuis MT5.
+2. **Choisir et coder une stratégie non martingale** (nouvel EA, nouveau fichier), avec dès le départ :
+   - risque fixe en % de l'equity par trade, SL et TP natifs en vrais points (`* _Point`) ;
+   - lot calculé depuis le risque, borné au lot min/max, refus explicite (log unique) si le lot min dépasse le risque ;
+   - kill switch sur pic d'equity, persisté.
+3. **Backtester** sur 2024-01-02 → aujourd'hui (vrais ticks) puis 2021 → aujourd'hui, avec la procédure section 5. Critère minimal avant démo : survit à toute la période, drawdown max acceptable, profit factor > 1.
+4. **Démo** plusieurs semaines, **puis seulement** live.
 
 ---
 
