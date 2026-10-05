@@ -2,11 +2,12 @@
 //|                                                GridExpHedge.mq5 |
 //|  Exponential hedge grid EA — Bollinger Bands trigger,           |
 //|  ATR-based spacing, 2x lot multiplier, hard level cap,          |
-//|  per-position native TP (points), global equity kill switch.    |
+//|  per-position native TP + SL, global equity kill switch with    |
+//|  initial-balance baseline persisted across EA restarts.         |
 //|  DEMO ACCOUNT ONLY until fully validated.                       |
 //+------------------------------------------------------------------+
 #property copyright "Demo/testing EA — not financial advice"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -29,11 +30,13 @@ input int    InpATRPeriod         = 14;      // ATR period for spacing
 input double InpATRSpacingFactor  = 1.5;     // Spacing = ATR * factor
 
 //--- Inputs: exits / safety
-input double InpTPPoints          = 15.0;    // Per-position TP, price points from entry
+input double InpTPPoints          = 15.0;    // Per-position TP, raw price distance from entry (NOT multiplied by _Point)
+input double InpSLPoints          = 2000.0;  // Per-position native SL in symbol points (x _Point; 2000 = $20 on 2-digit XAUUSD). 0 = off. Must stay > grid spacing
 input double InpBasketTPPercent   = 10.0;    // Combined-basket rescue TP, % of initial balance
 input double InpCommissionPerTrade= 4.50;    // Flat round-turn commission per position ($)
-input double InpEquityStopPercent = 50.0;    // Kill switch, % drawdown from initial balance
+input double InpEquityStopPercent = 20.0;    // Kill switch, % drawdown from initial balance
 input ulong  InpMagicBase         = 990100;  // Magic base (buy = base+1, sell = base+2)
+input bool   InpResetBaseline     = false;   // true = overwrite persisted initial balance with current balance on init (set back to false after)
 
 //--- Globals
 CTrade   trade;
@@ -69,7 +72,26 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   g_initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   //--- initial balance is persisted in a terminal global variable so that redeploying
+   //--- the EA (OnInit) does not silently move the kill-switch / basket-TP reference
+   string gvKey = BaselineKey();
+   if(InpResetBaseline || !GlobalVariableCheck(gvKey))
+     {
+      g_initialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      GlobalVariableSet(gvKey, g_initialBalance);
+      GlobalVariablesFlush();
+      Print("Initial balance baseline ", InpResetBaseline ? "RESET" : "created", ": ", g_initialBalance, " (", gvKey, ")");
+     }
+   else
+     {
+      g_initialBalance = GlobalVariableGet(gvKey);
+      Print("Initial balance baseline restored: ", g_initialBalance, " (", gvKey, ")");
+     }
+   if(g_initialBalance <= 0)
+     {
+      Print("Invalid initial balance baseline (", g_initialBalance, ") — delete global variable ", gvKey, " or set InpResetBaseline=true");
+      return(INIT_FAILED);
+     }
 
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
       Print("WARNING: account is not in hedging mode — simultaneous buy+sell grids will net instead of hedge.");
@@ -78,6 +100,12 @@ int OnInit()
 
    Print("GridExpHedge initialized. Initial balance snapshot: ", g_initialBalance);
    return(INIT_SUCCEEDED);
+  }
+
+//+------------------------------------------------------------------+
+string BaselineKey()
+  {
+   return("GridExpHedge_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_initialBalance");
   }
 
 //+------------------------------------------------------------------+
@@ -204,18 +232,21 @@ bool OpenGridOrder(bool isBuy, int level)
 
    string comment = StringFormat("GridExp-%s-L%d", isBuy ? "Buy" : "Sell", level);
    bool ok;
-   double fillPrice, tp;
+   double fillPrice, tp, sl;
+   double slDist = InpSLPoints * _Point;
    if(isBuy)
      {
       fillPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       tp = NormalizeDouble(fillPrice + InpTPPoints, _Digits);
-      ok = trade.Buy(lot, _Symbol, 0, 0, tp, comment);
+      sl = (InpSLPoints > 0) ? NormalizeDouble(fillPrice - slDist, _Digits) : 0.0;
+      ok = trade.Buy(lot, _Symbol, 0, sl, tp, comment);
      }
    else
      {
       fillPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
       tp = NormalizeDouble(fillPrice - InpTPPoints, _Digits);
-      ok = trade.Sell(lot, _Symbol, 0, 0, tp, comment);
+      sl = (InpSLPoints > 0) ? NormalizeDouble(fillPrice + slDist, _Digits) : 0.0;
+      ok = trade.Sell(lot, _Symbol, 0, sl, tp, comment);
      }
 
    if(!ok)
@@ -228,7 +259,7 @@ bool OpenGridOrder(bool isBuy, int level)
    if(isBuy) g_buyLastPrice = fillPrice;
    else      g_sellLastPrice = fillPrice;
 
-   Print(comment, " opened, lot=", lot, ", price=", fillPrice);
+   Print(comment, " opened, lot=", lot, ", price=", fillPrice, ", sl=", sl, ", tp=", tp);
    return(true);
   }
 
@@ -291,6 +322,15 @@ void CheckEntrySignals()
 
    double spacing = atr * InpATRSpacingFactor;
    if(spacing <= 0) return;
+
+   //--- per-position SL tighter than grid spacing would stop level N out before level N+1 can open
+   static datetime s_lastSpacingWarn = 0;
+   if(InpSLPoints > 0 && InpSLPoints * _Point <= spacing && TimeCurrent() - s_lastSpacingWarn > 3600)
+     {
+      Print("WARNING: SL distance (", InpSLPoints * _Point, ") <= grid spacing (", spacing,
+            ") — positions will hit SL before the next grid level can open");
+      s_lastSpacingWarn = TimeCurrent();
+     }
 
    //--- add buy level (price fell further against basket)
    buyLevel = CountLevel(g_magicBuy);

@@ -11,7 +11,7 @@ Construire un Expert Advisor MetaTrader 5 (`GridExpHedge.mq5`) qui trade **XAUUS
 
 L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `FusionMarkets-Live`, mode **Hedge**), avec un VPS MetaQuotes New York activé pour un fonctionnement 24/7 indépendant du Mac local.
 
-**Avertissement important** : la stratégie est un grid martingale exponentiel, structurellement à haut risque. Le compte a déjà été cramé une fois le 19 août 2026 (voir section Problèmes connus). Ne pas reconnecter en live sans avoir au minimum appliqué les 3 fixes de sécurité listés en section « Prochaine étape ».
+**Avertissement important** : la stratégie est un grid martingale exponentiel, structurellement à haut risque. Le compte a déjà été cramé une fois le 19 août 2026 (voir section Problèmes connus). Les 3 fixes de sécurité ont été codés le 2026-10-05 (v1.10) mais **ne sont pas encore testés en démo** — ne pas reconnecter en live avant.
 
 ---
 
@@ -32,7 +32,9 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 | TP natif par position | **15 points** (ordre TP envoyé au broker à l'ouverture) | Fermeture automatique côté broker, pas dépendant du check EA à chaque tick |
 | TP panier (rescue) | +10% du solde initial, net de commission | Mécanisme martingale conservé : si le combiné d'un panier (buy ou sell, filtre magic) repasse en profit suffisant, ferme tout ce qui reste de ce côté |
 | Commission | 4.50$ flat round-turn par position (Fusion Markets) | Décomptée du calcul `BasketProfit()` car MT5 ne l'inclut pas dans `POSITION_PROFIT` flottant |
-| Kill switch equity | **-50% du solde initial** (actuellement) | Garde-fou global, mais s'est révélé insuffisant en pratique (voir Problèmes connus) |
+| SL natif par position | **2000 points** (`InpSLPoints`, × `_Point` → 20$ de mouvement sur XAUUSD 2 décimales), 0 = désactivé | Ajouté v1.10. Le handoff précédent proposait 50-100 points, mais 100 points = 1$ sur l'or, bien moins que l'espacement grid (ATR×1.5) : chaque position serait stoppée avant l'ouverture du niveau suivant. Warning dans le journal si SL ≤ espacement |
+| Kill switch equity | **-20% du solde initial** (v1.10, était -50%) | -50% s'est révélé bien trop tolérant le 19 août |
+| Référence solde initial | Persistée dans la variable globale terminal `GridExpHedge_<login>_initialBalance` | v1.10 : ne bouge plus à chaque redéploiement. `InpResetBaseline = true` pour la réinitialiser (ex : après dépôt), puis remettre à `false` |
 | Anti-spam retry | Flag `g_buyBlocked`/`g_sellBlocked` : un ordre échoué (ex: marge insuffisante) stoppe les tentatives sur ce panier jusqu'à sa fermeture | Évite boucle de centaines d'ordres/sec (bug observé le 13 août) |
 
 ### Décisions environnement
@@ -41,7 +43,8 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 - **VPS MetaQuotes NY** activé pour tourner 24/7 (15$/mois, auto-renewal). Évite les coupures observées quand le Mac se verrouille (bug Wine qui tue le rendu MT5 en session verrouillée, cause de la perte du TP du 13 août).
 - **Compilation CLI** : `MetaEditor64.exe /compile:...` lancé via `wine` dans le prefix Wine. Produit `GridExpHedge.ex5` directement dans `MQL5/Experts/`.
 - **Mot de passe investisseur** (read-only) : évoqué pour un visu téléphone sans risque de manip, non confirmé configuré avec succès (user a eu souci "Invalid account", conversation s'est détournée avant résolution).
-- **Pas de remote git** configuré — tout est local, commits uniquement sur `main`.
+- **Remote git** : `https://github.com/cocodeleau/trading-bot-mt5` (privé), branche `main`.
+- **Poste Windows** également utilisé (session du 2026-10-05) : MT5 installé dans `C:\Program Files\MetaTrader 5\`, compilation CLI possible (voir section 5).
 
 ---
 
@@ -54,6 +57,7 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 - ✅ Bug anti-spam retry corrigé (constaté 13 Aug : 100aines d'ordres `buy 0.04 not enough money` en quelques secondes → flag `blocked` ajouté).
 - ✅ Multi-timeframe confluence implémenté avec paramètres BB séparés par TF (`InpBBPeriod_M15/H1`, `InpBBDeviation_M15/H1`).
 - ✅ Commit git du fichier source : `c60d3d4 Add GridExpHedge MT5 EA: multi-timeframe grid strategy`.
+- ✅ **v1.10 (2026-10-05)** : 3 fixes de sécurité codés (SL natif par position, kill switch 20%, solde initial persisté). Compile sans erreur ni warning avec MetaEditor Windows. **Pas encore testé en démo ni backtesté, pas encore déployé sur le terminal / VPS.**
 
 ## 4. Ce qui est seulement supposé (NON vérifié)
 
@@ -65,6 +69,8 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
   - `g_initialBalance` corrompu par les ~10 redéploiements de l'EA pendant la session (chaque `OnInit()` écrase la référence avec la balance du moment)
 - ❓ **Comportement du TP natif en points** quand MT5 est en mode "Points" vs "Pips" sur XAUUSD (`_Point` ou `SymbolInfoInteger(_Symbol, SYMBOL_DIGITS)` chez Fusion : non vérifié que 15 "points" dans mon code = 15 cents sur l'or et pas autre chose). Code actuel fait `fillPrice + InpTPPoints` brut, à vérifier que ça donne bien ~1.50$ de profit visé sur 0.01 lot.
 - ❓ **Mot de passe investisseur / connexion téléphone** : jamais confirmé fonctionnel, user bloqué sur "Invalid account".
+- ❓ **Valeur du SL (2000 points = 20$)** : choisie pour rester au-dessus de l'espacement grid, pas calibrée sur données réelles. À ajuster en démo selon le warning "SL distance <= grid spacing" et le nombre de niveaux atteints.
+- ❓ **Variables globales et VPS** : les variables globales du terminal local ne sont a priori pas migrées vers le VPS. Au premier lancement sur le VPS, la référence sera la balance du moment. Non vérifié.
 
 ---
 
@@ -72,9 +78,9 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 
 | Chemin | Contenu | État |
 |---|---|---|
-| `MQL5/Experts/GridExpHedge.mq5` | Source EA complet (seul fichier du projet) | Commité `c60d3d4` |
+| `MQL5/Experts/GridExpHedge.mq5` | Source EA complet (seul fichier du projet) | v1.10 commitée (3 fixes de sécurité) |
 | `MQL5/Experts/GridExpHedge.ex5` | Binaire compilé (côté dossier terminal MT5 Wine, PAS dans le repo git) | Dernière compile 2026-08-19, non versionné car binaire |
-| `HANDOFF.md` | Ce document | Nouveau |
+| `HANDOFF.md` | Ce document | Mis à jour 2026-10-05 |
 
 **Chemins externes importants pour la reprise :**
 - Terminal MT5 (Wine) : `~/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/Program Files/MetaTrader 5/`
@@ -88,6 +94,13 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
   "/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine" MetaEditor64.exe /compile:"MQL5\\Experts\\GridExpHedge.mq5" &
   sleep 8
   ```
+- Pour compiler sous **Windows** (PowerShell, depuis la racine du repo) — `/inc` pointe vers le dossier MQL5 du terminal (qui contient `Include\Trade\Trade.mqh`). Un code de sortie 1 = succès (nombre de fichiers compilés), lire le log :
+  ```powershell
+  $inc = (Get-ChildItem "$env:APPDATA\MetaQuotes\Terminal\*\MQL5" -Directory | Select-Object -First 1).FullName
+  & "C:\Program Files\MetaTrader 5\MetaEditor64.exe" /compile:"MQL5\Experts\GridExpHedge.mq5" /inc:"$inc" /log:build.log
+  Get-Content build.log -Encoding Unicode
+  ```
+  Si le chemin du repo est très long (> ~150 caractères), copier le `.mq5` dans un dossier court avant de compiler.
 
 ---
 
@@ -104,10 +117,10 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 
 **Enchaînement observé sur chart** : mouvement de ~180 points en quelques heures sur XAUUSD, suivi d'un retournement brutal. Les 2 paniers (buy et sell) ont pris simultanément, sell -106.91 et buy -72.89 sur les 2 dernières positions avant kill switch.
 
-**Causes structurelles identifiées** (non toutes corrigées) :
-1. ❌ **Aucun SL par position** — toute la protection reposait uniquement sur le kill switch equity vérifié à chaque tick, trop lent face à un move violent.
-2. ❌ **Kill switch à -50%** — beaucoup trop tolérant. L'écart observé entre seuil visé (~53$) et résultat (0.27$) prouve que même quand il tire, les positions sont déjà bien plus loin que prévu.
-3. ❌ **`g_initialBalance` non persistant** — se réinitialise à chaque `OnInit()`, donc à chaque redéploiement de l'EA (fait ~10 fois en session). Référence du seuil kill switch potentiellement corrompue avant le crash.
+**Causes structurelles identifiées** (corrigées dans le code v1.10, non validées en démo) :
+1. ✅ (v1.10) **Aucun SL par position** — toute la protection reposait uniquement sur le kill switch equity vérifié à chaque tick, trop lent face à un move violent. → `InpSLPoints` ajouté.
+2. ✅ (v1.10) **Kill switch à -50%** — beaucoup trop tolérant. L'écart observé entre seuil visé (~53$) et résultat (0.27$) prouve que même quand il tire, les positions sont déjà bien plus loin que prévu. → passé à 20%.
+3. ✅ (v1.10) **`g_initialBalance` non persistant** — se réinitialisait à chaque `OnInit()`, donc à chaque redéploiement de l'EA (fait ~10 fois en session). → persisté en variable globale terminal. Effet de bord voulu : après un kill switch, relancer l'EA ne le réactive pas tant que l'equity reste sous le seuil.
 
 ### 🟡 MOYEN — Bugs d'environnement
 
@@ -120,37 +133,27 @@ L'EA tourne en **live sur un compte Fusion Markets** (compte `493661`, serveur `
 ## 7. Questions ouvertes
 
 1. **Vérifier la vraie cause du crash du 19 août** avant d'appliquer les fixes à l'aveugle : stop-out broker ? slippage ? bug de calcul du check equity ? Télécharger les logs Fusion Markets détaillés si possible, ou backtest du scénario sur données tick de ce jour-là.
-2. **Est-ce que `InpTPPoints = 15` donne vraiment ~15 cents sur XAUUSD chez Fusion Markets ?** Vérifier avec `_Point` du symbole une fois en live/démo (devrait être 0.01 pour XAUUSD → 15 × 0.01 = 0.15$ de mouvement = très peu, à reconfirmer). Peut-être qu'il faut multiplier par `_Point` et `_Digits`.
+2. **TP par position : `InpTPPoints = 15` est ajouté brut au prix** (`fillPrice + InpTPPoints`, sans `* _Point`). Sur XAUUSD ça donne un TP à **15$ de mouvement**, pas 15 cents. Non corrigé volontairement (changerait toute la stratégie). Le journal affiche désormais `sl=` et `tp=` à chaque ouverture : vérifier en démo, puis décider si on passe en vrais points (`* _Point`) avec une nouvelle valeur. Attention : le SL, lui, est déjà en vrais points.
 3. **Faut-il abandonner le martingale** et pivoter sur une stratégie non-doublement (ex: grid à lot fixe + plus de niveaux, ou pure trend-following) ? Décision stratégique en suspens. User était jusqu'ici attaché au martingale "comme dans la pub d'origine".
 
 ---
 
 ## 8. Prochaine étape exacte
 
-**Avant toute reconnexion de l'EA sur un compte live**, implémenter les **3 fixes de sécurité** proposés et acceptés en principe mais non codés avant la fin de session :
+Les **3 fixes de sécurité** sont codés et compilés (v1.10, 2026-10-05) :
+- **Fix 1** — SL natif par position : `InpSLPoints` (défaut 2000 points, voir section 2 pour le choix de la valeur), passé à `trade.Buy/Sell` dans `OpenGridOrder()`.
+- **Fix 2** — kill switch `InpEquityStopPercent` : 50 → **20**.
+- **Fix 3** — `g_initialBalance` persisté via `GlobalVariableGet/Set()`, clé `GridExpHedge_<login>_initialBalance`, reset via l'input `InpResetBaseline` (ou `GlobalVariableDel()` / F3 dans le terminal).
 
-### Fix 1 — SL natif par position
-Dans `OpenGridOrder()` (actuellement passe `sl=0` aux appels `trade.Buy/Sell`), calculer un SL en points et le passer au broker en même temps que le TP. Nouvel input `InpSLPoints` (proposer défaut 50-100 points pour qu'il déclenche sur move violent mais pas sur bruit normal).
-
-### Fix 2 — Baisser le kill switch equity
-Changer la valeur par défaut `InpEquityStopPercent` de `50.0` à **15.0 ou 20.0**. L'expérience du 19 août prouve que 50% laisse largement le temps au désastre.
-
-### Fix 3 — Persister `g_initialBalance`
-Au lieu de `g_initialBalance = AccountInfoDouble(ACCOUNT_BALANCE)` dans `OnInit()`, utiliser `GlobalVariableGet/Set()` MQL5 (variable globale terminal, persiste entre les redéploiements de l'EA). Clé proposée : `"GridExpHedge_" + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "_initialBalance"`. Si pas encore set, créer avec balance actuelle ; sinon, lire la valeur persistée. Permet aussi un reset manuel via `GlobalVariableDel()`.
-
-### Après les 3 fixes
-1. Recompiler via Wine (voir commandes section 5).
-2. **Tester en démo d'abord** au moins quelques jours — on doit voir les SL tirer sur de petits moves adverses sans tuer la stratégie globale, et confirmer que le kill switch à 20% se déclenche propre.
-3. **Seulement ensuite** reconnecter sur un compte live (Fusion déjà configuré, VPS déjà actif).
+### Reste à faire, dans l'ordre
+1. Copier le `.mq5` dans le dossier Experts du terminal et recompiler (commandes section 5, Mac ou Windows).
+2. **Tester en démo d'abord** au moins quelques jours :
+   - vérifier dans le journal les valeurs `sl=` / `tp=` de chaque ordre (et trancher la question 2 sur le TP) ;
+   - vérifier l'absence du warning "SL distance <= grid spacing", ajuster `InpSLPoints` sinon ;
+   - voir des SL tirer sur moves adverses sans tuer la stratégie, et le kill switch à 20% se déclencher proprement ;
+   - redémarrer l'EA et vérifier "Initial balance baseline restored" dans le journal.
+3. **Seulement ensuite** reconnecter sur un compte live (Fusion déjà configuré, VPS déjà actif). Penser à la baseline côté VPS (section 4).
 4. Ouvrir une nouvelle discussion sur la viabilité stratégique du martingale à ce niveau de capital (question 3 des questions ouvertes).
-
-### Pour le git
-- Repo local actuellement sans remote. Avant d'utiliser `git push`, ajouter un remote :
-  ```bash
-  git remote add origin <URL>
-  git branch -M main
-  git push -u origin main
-  ```
 
 ---
 
