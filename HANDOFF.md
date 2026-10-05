@@ -120,6 +120,22 @@ Optimisation MT5 complète (1575 passes) : `InpTrendEMA` 100-300 pas 50, `InpPul
 | 256 meilleures passes — profit médian (sur 10 000$, 2.75 ans) | — | +279$ (~1%/an) |
 | Passes rentables | 1236 / 1575 | 166 / 256 |
 
+### MTFTrend — alignement de tendance M5 + M15 + H1 (2026-10-05)
+
+`MQL5/Experts/MTFTrend.mq5` : tendance par TF = SMA20 > SMA50 et clôture > SMA50 (baisse : miroir) ; trade seulement si M5, M15, H1 alignés ; déclencheur M5 `InpTrigger` 0 = retour bande médiane, 1 = clôture au-delà de la bande extérieure, 2 = mèche sur la bande opposée ; filtre RSI(14) M5 50-70 (0/1) ou 30-50 (2), ventes en miroir ; SL 1.5×ATR(14) M5, TP `InpRR`×risque, stop suiveur à 1R dès +1R ; risque 5% (choix user).
+
+Walk-forward (optimisation 2021-10 → 2023-12, forward 2024-01 → 2026-10, ticks réels, 6 combinaisons trigger × RR 2/3) :
+
+| | XAUUSD 1000$ | EURUSD 100$ |
+|---|---|---|
+| PF optimisation | 0.74 – 0.91 | 0.55 – 0.74 |
+| PF forward | 0.63 – 0.83 | 0.53 – 0.68 |
+| DD | 90% (kill switch) partout | 90% partout |
+
+Diagnostic XAUUSD trigger 0 / RR 2 / 2024 : compte cramé en 3.5 mois (1000$ → 104$ le 2024-04-19) ; −709$ sur les mouvements de prix **avant** frais, + −166$ commissions, −21$ swap. SL médian 1.84$ (M5) → frais = 10-20% du risque. Lot initial 0.29 (≈ levier 60×) à cause du risque 5% sur un SL minuscule. **Conclusion : perdante, pire que TrendPullback.**
+
+### Walk-forward TrendPullback — lecture
+
 Le classement sur la période d'optimisation ne prédit pas le forward (top 10 : profit forward médian 173$ ; rangs 50-256 : 310$). **Conclusion : pas d'avantage validé.** L'avantage apparent 2021-2023 est du surajustement ; en forward la stratégie est à l'équilibre, avant slippage réel. Choisir a posteriori le meilleur jeu en forward (150/70/3.0/2.5, PF 1.17) serait du cherry-picking.
 
 ## 4. Ce qui est seulement supposé (NON vérifié)
