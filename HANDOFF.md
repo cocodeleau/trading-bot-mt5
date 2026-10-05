@@ -86,6 +86,28 @@ Conditions communes : MT5 Strategy Tester, XAUUSD M5, données Fusion Markets Li
 4. Rescue TP figé à 10% du dépôt initial, indépendant du volume ouvert.
 5. TP natif `InpTPPoints` ajouté brut au prix (15$ de mouvement, pas 15 points).
 
+## 3ter. Stratégies non martingale — backtests (2026-10-05)
+
+Deux nouveaux EA partageant `MQL5/Include/TradingBot/RiskManager.mqh` (lot calculé pour risquer `InpRiskPercent` % de l'equity, lot min accepté tant que son risque ≤ `InpMaxRiskPercent`, sinon trade ignoré ; kill switch sur pic d'equity persisté qui appelle `TesterStop()` en backtest ; 1 position max ; décisions à la clôture de bougie) :
+- **`TrendPullback.mq5`** (option A) : tendance = clôture H4 vs EMA200 H4 ; entrée quand la bougie H1 clôturée touche l'EMA50 H1 et clôture du côté tendance ; SL = 1.5×ATR(14) H1 ; TP = 2×SL.
+- **`MeanRevertBB.mq5`** (option C) : clôture H1 hors Bollinger(20,2) → position inverse ; TP = bande médiane ; SL = 1.5×ATR ; ignoré si TP < 0.5×SL.
+
+Conditions : réglages par défaut, risque 1% (max 3%), levier 1:500, ticks réels, kill switch 90% (= test jusqu'au « vrai » crash).
+
+| EA | Symbole / dépôt | Période | Profit net | PF | DD max | Trades | % gagnants |
+|---|---|---|---|---|---|---|---|
+| TrendPullback | XAUUSD 1000$ | 2024→2026 | +112$ | 1.03 | 44% | 411 | 35% |
+| TrendPullback | XAUUSD 1000$ | 2021→2026 | +87$ | 1.02 | 55% | 795 | 35% |
+| TrendPullback | EURUSD 100$ | 2024→2026 | −30$ | 0.91 | 58% | 346 | 34% |
+| TrendPullback | EURUSD 100$ | 2021→2026 | −68$ | 0.79 | 71% | 311 | 31% |
+| MeanRevertBB | XAUUSD 1000$ | 2024→2026 | −537$ | 0.86 | 63% | 588 | 37% |
+| MeanRevertBB | XAUUSD 1000$ | 2021→2026 | −531$ | 0.94 | 62% | 1421 | 38% |
+| MeanRevertBB | EURUSD 100$ | 2024→2026 | −67$ | 0.91 | 79% | 701 | 38% |
+| MeanRevertBB | EURUSD 100$ | 2021→2026 | −67$ | 0.94 | 73% | 1007 | 39% |
+
+**Lecture** : aucune ne crame le compte (progrès vs martingale), mais aucune n'a d'avantage net. MeanRevertBB : écartée. TrendPullback/XAUUSD : quasi à l'équilibre (35% gagnants pour 33% nécessaires à RR 2), seul candidat à optimiser.
+**Limite capital** : sur ces dépôts le lot min (0.01) risque déjà 1.5-3% par trade → risque effectif 2-3% (d'où les DD 44-79%) et des centaines de jours sans trade quand l'equity baisse. Risquer réellement 1% sur l'or avec SL 1.5×ATR H1 demande ~2000-3000$.
+
 ## 4. Ce qui est seulement supposé (NON vérifié)
 
 - ❓ **Comportement du TP panier combiné sous drawdown réel** : jamais déclenché pendant un vrai mouvement adverse en live. Vu uniquement en démo sur paniers 2 niveaux max dans un marché calme.
@@ -105,7 +127,10 @@ Conditions communes : MT5 Strategy Tester, XAUUSD M5, données Fusion Markets Li
 
 | Chemin | Contenu | État |
 |---|---|---|
-| `MQL5/Experts/GridExpHedge.mq5` | Source EA complet (seul fichier du projet) | v1.20 commitée — stratégie abandonnée, gardée pour référence |
+| `MQL5/Experts/GridExpHedge.mq5` | EA grid martingale | v1.20 commitée — stratégie abandonnée, gardée pour référence |
+| `MQL5/Experts/TrendPullback.mq5` | Option A, suivi de tendance | v1.00, backtestée (section 3ter), en cours d'optimisation walk-forward |
+| `MQL5/Experts/MeanRevertBB.mq5` | Option C, retour à la moyenne | v1.00, backtestée, écartée |
+| `MQL5/Include/TradingBot/RiskManager.mqh` | Gestion du risque commune | À copier dans `MQL5\Include\TradingBot\` du terminal avant compilation |
 | `MQL5/Experts/GridExpHedge.ex5` | Binaire compilé (côté dossier terminal MT5 Wine, PAS dans le repo git) | Dernière compile 2026-08-19, non versionné car binaire |
 | `HANDOFF.md` | Ce document | Mis à jour 2026-10-05 |
 
@@ -180,7 +205,7 @@ Conditions communes : MT5 Strategy Tester, XAUUSD M5, données Fusion Markets Li
 
 1. ~~Vraie cause du crash du 19 août~~ → réglée par les backtests : structure martingale + lots indexés sur la balance (section 3bis).
 2. ~~TP natif en points~~ → confirmé : 15$ de mouvement, jamais touché en backtest. Sans objet (stratégie abandonnée).
-3. ✅ **Abandon du martingale décidé le 2026-10-05.** Choix de la nouvelle stratégie non martingale : en cours de discussion.
+3. ✅ **Abandon du martingale décidé le 2026-10-05.** Options A (TrendPullback) et C (MeanRevertBB) codées et backtestées (section 3ter) ; C écartée, A en optimisation walk-forward.
 4. **Capital** : 100$ est très juste pour XAUUSD (lot min 0.01 = 1$ par 1$ de mouvement). Toute nouvelle stratégie doit risquer un % fixe de l'equity par trade et rester viable avec 0.01 lot.
 
 ---
@@ -190,12 +215,9 @@ Conditions communes : MT5 Strategy Tester, XAUUSD M5, données Fusion Markets Li
 GridExpHedge (v1.20) est conservé dans le repo pour référence uniquement.
 
 1. **Désactiver GridExpHedge sur le VPS MetaQuotes** (il y tourne encore en v1.00). À faire par le user depuis MT5.
-2. **Choisir et coder une stratégie non martingale** (nouvel EA, nouveau fichier), avec dès le départ :
-   - risque fixe en % de l'equity par trade, SL et TP natifs en vrais points (`* _Point`) ;
-   - lot calculé depuis le risque, borné au lot min/max, refus explicite (log unique) si le lot min dépasse le risque ;
-   - kill switch sur pic d'equity, persisté.
-3. **Backtester** sur 2024-01-02 → aujourd'hui (vrais ticks) puis 2021 → aujourd'hui, avec la procédure section 5. Critère minimal avant démo : survit à toute la période, drawdown max acceptable, profit factor > 1.
-4. **Démo** plusieurs semaines, **puis seulement** live.
+2. ✅ Stratégies non martingale codées et backtestées (section 3ter).
+3. **Optimisation walk-forward de TrendPullback sur XAUUSD** : optimiser sur 2021-10 → 2023-12, vérifier sans retoucher sur 2024-01 → 2026-10. Si l'avantage ne tient pas sur la période de vérification → pas de démo, revoir l'approche.
+4. Si validé : décider du capital (≥ ~2000-3000$ pour un vrai risque de 1% sur l'or), puis **démo** plusieurs semaines, **puis seulement** live.
 
 ---
 
