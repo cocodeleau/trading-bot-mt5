@@ -108,6 +108,20 @@ Conditions : réglages par défaut, risque 1% (max 3%), levier 1:500, ticks rée
 **Lecture** : aucune ne crame le compte (progrès vs martingale), mais aucune n'a d'avantage net. MeanRevertBB : écartée. TrendPullback/XAUUSD : quasi à l'équilibre (35% gagnants pour 33% nécessaires à RR 2), seul candidat à optimiser.
 **Limite capital** : sur ces dépôts le lot min (0.01) risque déjà 1.5-3% par trade → risque effectif 2-3% (d'où les DD 44-79%) et des centaines de jours sans trade quand l'equity baisse. Risquer réellement 1% sur l'or avec SL 1.5×ATR H1 demande ~2000-3000$.
 
+### Walk-forward TrendPullback / XAUUSD (2026-10-05)
+
+Optimisation MT5 complète (1575 passes) : `InpTrendEMA` 100-300 pas 50, `InpPullbackEMA` 20-100 pas 10, `InpSLATRMult` 1.0-3.0 pas 0.5, `InpRR` 1.0-4.0 pas 0.5. Optimisation sur **2021-10-01 → 2023-12-31**, forward (non retouché) sur **2024-01-01 → 2026-10-01**. Dépôt 10 000$ (pour que le risque 1% soit réel), modèle « 1 minute OHLC », critère « Complex Criterion ». Config : `wf_tp_xau.ini` dans le dossier de données du terminal ; résultats `reports\WF_TP_XAU.xml` et `.forward.xml`.
+
+| | Période d'optimisation | Forward |
+|---|---|---|
+| Top 15 (classés sur l'optimisation) — PF | 1.22 à 1.57 | **0.90 à 1.17** |
+| Top 15 — DD max | 5.5 à 11.5% | 9.9 à 17.3% |
+| 256 meilleures passes — PF médian | — | **1.02** (p25 0.97, p75 1.09) |
+| 256 meilleures passes — profit médian (sur 10 000$, 2.75 ans) | — | +279$ (~1%/an) |
+| Passes rentables | 1236 / 1575 | 166 / 256 |
+
+Le classement sur la période d'optimisation ne prédit pas le forward (top 10 : profit forward médian 173$ ; rangs 50-256 : 310$). **Conclusion : pas d'avantage validé.** L'avantage apparent 2021-2023 est du surajustement ; en forward la stratégie est à l'équilibre, avant slippage réel. Choisir a posteriori le meilleur jeu en forward (150/70/3.0/2.5, PF 1.17) serait du cherry-picking.
+
 ## 4. Ce qui est seulement supposé (NON vérifié)
 
 - ❓ **Comportement du TP panier combiné sous drawdown réel** : jamais déclenché pendant un vrai mouvement adverse en live. Vu uniquement en démo sur paniers 2 niveaux max dans un marché calme.
@@ -128,7 +142,7 @@ Conditions : réglages par défaut, risque 1% (max 3%), levier 1:500, ticks rée
 | Chemin | Contenu | État |
 |---|---|---|
 | `MQL5/Experts/GridExpHedge.mq5` | EA grid martingale | v1.20 commitée — stratégie abandonnée, gardée pour référence |
-| `MQL5/Experts/TrendPullback.mq5` | Option A, suivi de tendance | v1.00, backtestée (section 3ter), en cours d'optimisation walk-forward |
+| `MQL5/Experts/TrendPullback.mq5` | Option A, suivi de tendance | v1.00, backtestée + walk-forward (section 3ter) : avantage non validé |
 | `MQL5/Experts/MeanRevertBB.mq5` | Option C, retour à la moyenne | v1.00, backtestée, écartée |
 | `MQL5/Include/TradingBot/RiskManager.mqh` | Gestion du risque commune | À copier dans `MQL5\Include\TradingBot\` du terminal avant compilation |
 | `MQL5/Experts/GridExpHedge.ex5` | Binaire compilé (côté dossier terminal MT5 Wine, PAS dans le repo git) | Dernière compile 2026-08-19, non versionné car binaire |
@@ -216,8 +230,9 @@ GridExpHedge (v1.20) est conservé dans le repo pour référence uniquement.
 
 1. **Désactiver GridExpHedge sur le VPS MetaQuotes** (il y tourne encore en v1.00). À faire par le user depuis MT5.
 2. ✅ Stratégies non martingale codées et backtestées (section 3ter).
-3. **Optimisation walk-forward de TrendPullback sur XAUUSD** : optimiser sur 2021-10 → 2023-12, vérifier sans retoucher sur 2024-01 → 2026-10. Si l'avantage ne tient pas sur la période de vérification → pas de démo, revoir l'approche.
-4. Si validé : décider du capital (≥ ~2000-3000$ pour un vrai risque de 1% sur l'or), puis **démo** plusieurs semaines, **puis seulement** live.
+3. ✅ Walk-forward TrendPullback/XAUUSD fait → **avantage non validé** (PF forward médian 1.02). Pas de démo en l'état.
+4. Décision en attente du user : arrêter le trading algo réel / garder le projet comme apprentissage, ou tester une approche réellement différente — toujours avec le même protocole (optimisation 2021-2023, forward 2024-2026 non retouché, puis ticks réels). Ne pas multiplier les variantes optimisées sur les mêmes données (risque de surajustement).
+5. Si un jour une stratégie est validée : capital ≥ ~2000-3000$ pour un vrai risque de 1% sur l'or, puis **démo** plusieurs semaines, **puis seulement** live.
 
 ---
 
