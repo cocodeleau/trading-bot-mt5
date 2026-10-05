@@ -134,6 +134,45 @@ Walk-forward (optimisation 2021-10 → 2023-12, forward 2024-01 → 2026-10, tic
 
 Diagnostic XAUUSD trigger 0 / RR 2 / 2024 : compte cramé en 3.5 mois (1000$ → 104$ le 2024-04-19) ; −709$ sur les mouvements de prix **avant** frais, + −166$ commissions, −21$ swap. SL médian 1.84$ (M5) → frais = 10-20% du risque. Lot initial 0.29 (≈ levier 60×) à cause du risque 5% sur un SL minuscule. **Conclusion : perdante, pire que TrendPullback.**
 
+### MTFTrend v1.10 — H1 + H4 + D1 (2026-10-05/06)
+
+v1.10 : TF configurables (`InpTFEntry`, `InpTFMid`, `InpTFHigh` ; codes testeur H1=16385, H4=16388, D1=16408). Mêmes règles, entrée H1, tendance confirmée H4 + D1.
+
+**Walk-forward (risque 1%, max 3%)**, optimisation 2021-10 → 2023-12, forward 2024-01 → 2026-10, ticks réels :
+
+| XAUUSD 1000$ | Optimisation | Forward |
+|---|---|---|
+| trigger 0, RR 2 (meilleur en optimisation) | +113$, PF 1.12, DD 7.9% | **+513$, PF 1.21, DD 17.5%** |
+| trigger 0, RR 3 | +109$, PF 1.12 | +466$, PF 1.20 |
+| trigger 1, RR 3 / RR 2 | +41$, PF 1.10 | +496$ PF 1.53 / +250$ PF 1.26 |
+| trigger 2 | PF 0.81-0.86 | PF 0.87-0.88 |
+
+EURUSD 100$ : perdant partout (PF forward 0.60-0.86). Diagnostic XAUUSD trigger 0/RR 2 : longs +562$ / shorts +46$ en forward (2024-26), longs +58$ / shorts +99$ en 2021-23 ; commissions ~13-15$ ; lot quasi toujours 0.01 (min lot → risque réel ~2%). Ticks 2021-23 = 0% réels.
+
+**Risque qui suit l'equity** (trigger 0, RR 2, XAUUSD) :
+
+| Config | 2021-23 | 2024-26 |
+|---|---|---|
+| 10 000$, 1% | +1763$ (+17.6%), PF 1.14, DD 11.2%, lots 0.18→0.25 | +5039$ (+50%), PF 1.29, DD 9.0%, lots 0.19→0.07 (ATR en $ ↑ avec le prix de l'or) |
+| 1 000$, 1% strict (`InpMaxRiskPercent=1`) | +156$, PF 1.16, DD 12% | +331$, PF 1.52, DD 5.9%, mais 153 trades au lieu de 297 (min lot > 1% → ignorés) |
+| 1 000$, 5% | +587$, PF 1.07, **DD 52%** (pic 2394$ → 1587$) | +3931$ (+393%), PF 1.19, **DD 40%** |
+| 10 000$, 5% | +6612$, PF 1.07, DD 52% | +41135$, PF 1.18, DD 26% |
+
+5% : rendement ×4-8 mais DD ×4-5 et PF plus faible ; déconseillé.
+
+**Même config, 5%, 1000$, sur 6 indices** :
+
+| Indice | 2021-23 | 2024-26 |
+|---|---|---|
+| GER40 | +278$, PF 1.07, DD 51% | +777$, PF 1.10, DD 37% |
+| US30 | +341$, PF 1.06, DD 66% | +257$, PF 1.03, DD 53% |
+| JPN225 | +258$, PF 1.05 | −823$, **cramé** (kill switch 90%) |
+| NAS100 | −427$, PF 0.91 | −860$, PF 0.77 (13% ticks réels) |
+| UK100 | −550$, PF 0.80 | −679$, PF 0.81 |
+| US500 | **cramé** | **cramé** |
+
+**Lecture** : l'avantage ne se généralise pas (4 actifs perdants sur 7, dont 2 cramés ; indices très haussiers perdants). Le résultat XAUUSD est probablement lié en grande partie à la hausse exceptionnelle de l'or 2024-26. Prochaine étape : test de robustesse sur l'or (paramètres voisins), puis éventuelle démo à 1-2%.
+
 ### Walk-forward TrendPullback — lecture
 
 Le classement sur la période d'optimisation ne prédit pas le forward (top 10 : profit forward médian 173$ ; rangs 50-256 : 310$). **Conclusion : pas d'avantage validé.** L'avantage apparent 2021-2023 est du surajustement ; en forward la stratégie est à l'équilibre, avant slippage réel. Choisir a posteriori le meilleur jeu en forward (150/70/3.0/2.5, PF 1.17) serait du cherry-picking.
@@ -160,6 +199,7 @@ Le classement sur la période d'optimisation ne prédit pas le forward (top 10 :
 | `MQL5/Experts/GridExpHedge.mq5` | EA grid martingale | v1.20 commitée — stratégie abandonnée, gardée pour référence |
 | `MQL5/Experts/TrendPullback.mq5` | Option A, suivi de tendance | v1.00, backtestée + walk-forward (section 3ter) : avantage non validé |
 | `MQL5/Experts/MeanRevertBB.mq5` | Option C, retour à la moyenne | v1.00, backtestée, écartée |
+| `MQL5/Experts/MTFTrend.mq5` | Alignement de tendance 3 TF + Bollinger/RSI | v1.10 (TF configurables), candidat XAUUSD H1/H4/D1 en cours de validation |
 | `MQL5/Include/TradingBot/RiskManager.mqh` | Gestion du risque commune | À copier dans `MQL5\Include\TradingBot\` du terminal avant compilation |
 | `MQL5/Experts/GridExpHedge.ex5` | Binaire compilé (côté dossier terminal MT5 Wine, PAS dans le repo git) | Dernière compile 2026-08-19, non versionné car binaire |
 | `HANDOFF.md` | Ce document | Mis à jour 2026-10-05 |
@@ -247,7 +287,7 @@ GridExpHedge (v1.20) est conservé dans le repo pour référence uniquement.
 1. **Désactiver GridExpHedge sur le VPS MetaQuotes** (il y tourne encore en v1.00). À faire par le user depuis MT5.
 2. ✅ Stratégies non martingale codées et backtestées (section 3ter).
 3. ✅ Walk-forward TrendPullback/XAUUSD fait → **avantage non validé** (PF forward médian 1.02). Pas de démo en l'état.
-4. Décision en attente du user : arrêter le trading algo réel / garder le projet comme apprentissage, ou tester une approche réellement différente — toujours avec le même protocole (optimisation 2021-2023, forward 2024-2026 non retouché, puis ticks réels). Ne pas multiplier les variantes optimisées sur les mêmes données (risque de surajustement).
+4. ✅ MTFTrend (choix du user) testé en M5/M15/H1 (perdant) puis H1/H4/D1 (positif sur XAUUSD seulement, voir 3ter). **En cours : test de robustesse XAUUSD** (paramètres voisins de SMA20/SMA50/SL 1.5×ATR). Ne pas multiplier les variantes optimisées sur les mêmes données (risque de surajustement — MTFTrend est déjà la 5e famille testée).
 5. Si un jour une stratégie est validée : capital ≥ ~2000-3000$ pour un vrai risque de 1% sur l'or, puis **démo** plusieurs semaines, **puis seulement** live.
 
 ---

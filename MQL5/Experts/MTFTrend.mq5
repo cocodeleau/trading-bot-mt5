@@ -1,6 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                     MTFTrend.mq5 |
-//|  Multi-timeframe trend alignment (M5 + M15 + H1), no martingale. |
+//|  Multi-timeframe trend alignment (default M5 + M15 + H1, inputs),|
+//|  no martingale.                                                   |
 //|  Trend on each TF: SMA20 > SMA50 and close > SMA50 (bear: mirror)|
 //|  Trade only when all three TFs agree, triggered on M5 by one of  |
 //|  three Bollinger modes, filtered by M5 RSI.                      |
@@ -9,7 +10,7 @@
 //|  trade is InpTrailStartR in profit.                              |
 //+------------------------------------------------------------------+
 #property copyright "Demo/testing EA — not financial advice"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <TradingBot/RiskManager.mqh>
@@ -21,6 +22,9 @@ enum ENUM_BB_TRIGGER
    TRIGGER_DEEP     = 2    // Deep pullback: wick touches the opposite outer band
   };
 
+input ENUM_TIMEFRAMES InpTFEntry     = PERIOD_M5;   // Entry timeframe (trend + Bollinger/RSI/ATR trigger)
+input ENUM_TIMEFRAMES InpTFMid       = PERIOD_M15;  // Middle timeframe (trend only)
+input ENUM_TIMEFRAMES InpTFHigh      = PERIOD_H1;   // Higher timeframe (trend only)
 input ENUM_BB_TRIGGER InpTrigger     = TRIGGER_MIDDLE;
 input int    InpMAFast               = 20;     // Fast SMA (all timeframes)
 input int    InpMASlow               = 50;     // Slow SMA (all timeframes)
@@ -40,7 +44,7 @@ input double InpEquityStopPercent    = 20.0;   // Kill switch, % drawdown from p
 input bool   InpResetPeak            = false;  // true = reset persisted peak equity on init
 input ulong  InpMagic                = 990401;
 
-const ENUM_TIMEFRAMES TFS[3] = {PERIOD_M5, PERIOD_M15, PERIOD_H1};
+ENUM_TIMEFRAMES TFS[3];
 int hFast[3], hSlow[3];
 int hBB  = INVALID_HANDLE;
 int hRSI = INVALID_HANDLE;
@@ -49,6 +53,9 @@ int hATR = INVALID_HANDLE;
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   TFS[0] = InpTFEntry;
+   TFS[1] = InpTFMid;
+   TFS[2] = InpTFHigh;
    for(int i = 0; i < 3; i++)
      {
       hFast[i] = iMA(_Symbol, TFS[i], InpMAFast, 0, MODE_SMA, PRICE_CLOSE);
@@ -59,9 +66,9 @@ int OnInit()
          return(INIT_FAILED);
         }
      }
-   hBB  = iBands(_Symbol, PERIOD_M5, InpBBPeriod, 0, InpBBDeviation, PRICE_CLOSE);
-   hRSI = iRSI(_Symbol, PERIOD_M5, InpRSIPeriod, PRICE_CLOSE);
-   hATR = iATR(_Symbol, PERIOD_M5, InpATRPeriod);
+   hBB  = iBands(_Symbol, InpTFEntry, InpBBPeriod, 0, InpBBDeviation, PRICE_CLOSE);
+   hRSI = iRSI(_Symbol, InpTFEntry, InpRSIPeriod, PRICE_CLOSE);
+   hATR = iATR(_Symbol, InpTFEntry, InpATRPeriod);
    if(hBB == INVALID_HANDLE || hRSI == INVALID_HANDLE || hATR == INVALID_HANDLE)
      {
       Print("Failed to create indicator handles");
@@ -143,7 +150,7 @@ void OnTick()
       ManageTrailing();
       return;
      }
-   if(!RM_IsNewBar(PERIOD_M5)) return;
+   if(!RM_IsNewBar(InpTFEntry)) return;
 
    //--- all three timeframes must agree
    int t5 = TrendOf(0);
@@ -156,9 +163,9 @@ void OnTick()
    if(!RM_Buffer(hBB, 2, 1, lower)) return;
    if(!RM_Buffer(hRSI, 0, 1, rsi)) return;
    if(!RM_Buffer(hATR, 0, 1, atr) || atr <= 0) return;
-   double high1  = iHigh(_Symbol, PERIOD_M5, 1);
-   double low1   = iLow(_Symbol, PERIOD_M5, 1);
-   double close1 = iClose(_Symbol, PERIOD_M5, 1);
+   double high1  = iHigh(_Symbol, InpTFEntry, 1);
+   double low1   = iLow(_Symbol, InpTFEntry, 1);
+   double close1 = iClose(_Symbol, InpTFEntry, 1);
 
    //--- RSI filter: momentum band for MIDDLE/BREAKOUT, pullback band for DEEP (sell side mirrored around 50)
    double rsiDir = isBuy ? rsi : 100.0 - rsi;
